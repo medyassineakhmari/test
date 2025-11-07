@@ -1,18 +1,16 @@
-
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: kafka-controller
 spec:
   serviceName: "kafka-controller-service"
-  replicas: 1
+  replicas: 3
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: kafka-controller
 
-  #DEFINE THE POD SPEC
   template:
-    # POD METADATA
     metadata:
       labels:
         app: kafka-controller
@@ -21,23 +19,19 @@ spec:
         - name: controller
           image: apache/kafka:3.8.0
           imagePullPolicy: IfNotPresent
-
-          # We'll compute env dynamically using bash before exec'ing Kafka.
-          command: [ "/bin/bash","-c" ]
+          command: ["/bin/bash","-c"]
           args:
             - |
-              
               set -e
+              CLUSTER_ID="laA2BR9-So-1wGxQEMI_EQ"  # même pour tout le cluster
 
-              CLUSTER_ID="laA2BR9-So-1wGxQEMI_EQ"  # <- same across all nodes in the cluster
-
-              # Derive NODE_ID from pod ordinal (HOSTNAME is like kafka-controller-0)
+              # Ordinal = 0/1/2 d'après le nom du Pod, ex: kafka-controller-0
               ORDINAL=$(echo ${HOSTNAME} | awk -F- '{print $NF}')
-              NODE_ID=$((ORDINAL + 1))
+              NODE_ID=${ORDINAL}  # <== IMPORTANT: 0,1,2 pour matcher quorum.voters
 
               echo "My ordinal is ${ORDINAL}, so NODE_ID=${NODE_ID}"
 
-              # 1. Write a config file that matches THIS pod
+              # 1) Config du contrôleur
               cat > /var/lib/kafka/data/controller.properties <<EOF
               process.roles=controller
               node.id=${NODE_ID}
@@ -45,21 +39,13 @@ spec:
               log.dirs=/var/lib/kafka/data
 
               controller.listener.names=CONTROLLER
-              controller.quorum.voters=1@kafka-controller-0.kafka-controller-service:9093
+              controller.quorum.voters=0@kafka-controller-0.kafka-controller-service:9093,1@kafka-controller-1.kafka-controller-service:9093,2@kafka-controller-2.kafka-controller-service:9093
 
               listeners=CONTROLLER://:9093
               listener.security.protocol.map=CONTROLLER:PLAINTEXT
-
-              inter.broker.listener.name=CONTROLLER
-
-              num.partitions=3
-              offsets.topic.replication.factor=1
-              transaction.state.log.replication.factor=1
-              transaction.state.log.min.isr=1
-              auto.create.topics.enable=true
               EOF
 
-              # 2. Format storage if needed
+              # 2) Formatage du stockage si nécessaire
               if [ ! -f /var/lib/kafka/data/meta.properties ]; then
                 echo "Formatting storage with CLUSTER_ID=${CLUSTER_ID} and NODE_ID=${NODE_ID}"
                 /opt/kafka/bin/kafka-storage.sh format \
@@ -70,13 +56,11 @@ spec:
                 echo "meta.properties already exists, skip format"
               fi
 
-              # 3. For debugging, show what meta.properties looks like now
               echo "Resulting meta.properties:"
               cat /var/lib/kafka/data/meta.properties || true
-              
               echo "Starting controller using generated config"
-
               exec /opt/kafka/bin/kafka-server-start.sh /var/lib/kafka/data/controller.properties
+
           ports:
             - containerPort: 9093
               name: controller
@@ -103,10 +87,6 @@ spec:
         resources:
           requests:
             storage: 1Gi
-
-# ==================== END ===================
-
-# ======== DEFINE Headless Service for statefulset ==============
 ---
 apiVersion: v1
 kind: Service
@@ -120,4 +100,4 @@ spec:
     - name: controller
       port: 9093
       targetPort: 9093
-      protocol: TCP
+      protocol: TCP  # headless service pour DNS par Pod

@@ -1,30 +1,158 @@
+# 1) Le script Python dans un ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: python-producer-script
+data:
+  producer.py: |
+    import os, json, time
+    import pandas as pd
+    from confluent_kafka import Producer
+    from confluent_kafka.admin import AdminClient, NewTopic
+
+    BOOTSTRAP = os.getenv("BOOTSTRAP_SERVERS",
+        "kafka-broker-0.kafka-broker-service:19092,"
+        "kafka-broker-1.kafka-broker-service:19092,"
+        "kafka-broker-2.kafka-broker-service:19092"
+    )
+    TOPIC = os.getenv("TOPIC", "demo")
+    DATASET_DIR = os.getenv("DATASET_DIR", "/data/events_logs_dataset")
+    FEATURES_FILE = os.path.join(DATASET_DIR, "UNSW-NB15_features.csv")
+    CSV_FILES = [
+        os.path.join(DATASET_DIR, "UNSW-NB15_1.csv"),
+        os.path.join(DATASET_DIR, "UNSW-NB15_2.csv"),
+        os.path.join(DATASET_DIR, "UNSW-NB15_3.csv"),
+        os.path.join(DATASET_DIR, "UNSW-NB15_4.csv"),
+    ]
+
+    producer_conf = {
+        "bootstrap.servers": BOOTSTRAP,
+        "enable.idempotence": True,
+        "acks": "all",
+        "compression.type": "lz4",
+        "linger.ms": 20,
+        "batch.num.messages": 10000,
+        "message.timeout.ms": 120000,
+    }
+    p = Producer(producer_conf)
+
+    def on_delivery(err, msg):
+        if err:
+            print(f"❌ Delivery failed: {err}")
+        else:
+            print(f"✅ {msg.topic()}[{msg.partition()}] offset={msg.offset()}")
+
+    def ensure_topic(admin: AdminClient, topic: str, partitions=6, rf=3):
+        md = admin.list_topics(timeout=10)
+        if topic in md.topics and not md.topics[topic].error:
+            return
+        fs = admin.create_topics([NewTopic(topic, num_partitions=partitions, replication_factor=rf)])
+        try:
+            fs[topic].result()
+            print(f"ℹ️ Topic '{topic}' créé (partitions={partitions}, RF={rf}).")
+        except Exception as e:
+            if "Topic already exists" in str(e):
+                print(f"ℹ️ Topic '{topic}' existe déjà.")
+            else:
+                raise
+
+    def send_row_as_json(topic: str, row: pd.Series):
+        payload = row.to_dict()
+        p.produce(topic=topic, value=json.dumps(payload).encode("utf-8"), on_delivery=on_delivery)
+        p.poll(0)
+
+    if __name__ == "__main__":
+        admin = AdminClient({"bootstrap.servers": BOOTSTRAP})
+        # RF=3 car tu as 3 brokers. Si tu n’en as que 2 up, passe rf=2.
+        ensure_topic(admin, TOPIC, partitions=6, rf=int(os.getenv("RF", "3")))
+
+        features_pd = pd.read_csv(FEATURES_FILE, encoding="utf-8", encoding_errors="ignore")
+        feature_names = features_pd["Name"].tolist()
+
+        try:
+            idx = 0
+            while True:
+                csv_path = CSV_FILES[idx]
+                print(f"➡️ Lecture: {csv_path}")
+                df = pd.read_csv(csv_path, header=None)
+                df.columns = feature_names
+                if "attack_cat" in df.columns: df = df.drop(columns=["attack_cat"])
+                if "Label" in df.columns: df = df.drop(columns=["Label"])
+
+                for i, row in df.iterrows():
+                    send_row_as_json(TOPIC, row)
+                    if i % 10 == 0:
+                        time.sleep(1)
+
+                idx = (idx + 1) % len(CSV_FILES)
+        except KeyboardInterrupt:
+            print("🛑 Arrêt demandé.")
+        finally:
+            print("⏳ flush…")
+            p.flush(30)
+            print("✅ Terminé.")
+
+---
+# 2) Le Pod qui télécharge les données puis lance le producer
 apiVersion: v1
 kind: Pod
 metadata:
   name: python-producer
 spec:
-  nodeName: minikube 
+  restartPolicy: Always
+  # nodeName: minikube  # <- garde-le si tu veux forcer ce nœud; sinon supprime
+  volumes:
+    - name: data
+      emptyDir: {}
+    - name: script
+      configMap:
+        name: python-producer-script
+        items:
+          - key: producer.py
+            path: producer.py
+
+  initContainers:
+    - name: fetch-dataset
+      image: meganz/megacmd:latest
+      command: ["/bin/sh","-c"]
+      args:
+        - |
+          set -ex
+          mkdir -p /data/events_logs_dataset
+          mega-get "https://mega.nz/folder/EYcF3I7A#shlgKrU69INQxKbrZdDBxQ" /data/events_logs_dataset
+          ls -lh /data/events_logs_dataset || true
+      volumeMounts:
+        - name: data
+          mountPath: /data
+
   containers:
-    - name: mycontainer
-      image: python:3.11  #debian based, has bash
-      securityContext:
-        runAsUser: 0
-      command:
-      - /bin/bash
-      - -c
-      - |
-        echo ${POD_NAME}
-        apt-get update && apt-get install -y kcat
-        apt-get install -y dnsutils
-        apt-get install -y nano
-        wget https://mega.nz/linux/repo/Debian_13/amd64/megacmd-Debian_13_amd64.deb && apt install -y "$PWD/megacmd-Debian_13_amd64.deb"
-        pip install confluent-kafka pandas
-        sleep 3600
-#      volumeMounts:
-#        - name: host-volume
-#          mountPath: /app
-#  volumes:
-#    - name: host-volume
-#      hostPath:
-#        path: /mnt/python_producer
-#        type: Directory
+    - name: producer
+      image: python:3.11
+      env:
+        - name: BOOTSTRAP_SERVERS
+          value: "kafka-broker-0.kafka-broker-service:19092,kafka-broker-1.kafka-broker-service:19092,kafka-broker-2.kafka-broker-service:19092"
+        - name: TOPIC
+          value: "demo"
+        - name: DATASET_DIR
+          value: "/data/events_logs_dataset"
+        - name: RF
+          value: "3"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+      command: ["/bin/bash","-lc"]
+      args:
+        - |
+          pip install --no-cache-dir "confluent-kafka==2.6.*" pandas && \
+          python /app/producer.py
+      volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: script
+          mountPath: /app
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+        limits:
+          cpu: "1"
+          memory: "1Gi"

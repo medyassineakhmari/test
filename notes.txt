@@ -1,0 +1,27 @@
+- Chaque broket kafka devrait avoir son propre PersistentVolume(PV)
+- Pod en mode deployement, ils sont traités de la même manière si un tombe l'autre peut prendre sa place avec un autre nom.
+- Pod en mode statefulset, lorsqu'on parle des databases sont critiques et ne pas faciles à déployer, on garde ID de pod son nom ses informations critques.
+
+Command: intégrer kubectl à minikube
+            # one-shot
+            minikube kubectl -- get pods -A
+
+            # ou fais-toi un alias persistant dans ~/.bashrc
+            echo "alias kubectl='minikube kubectl --'" >> ~/.bashrc
+            source ~/.bashrc
+            kubectl get pods -A
+
+Explication:
+    minikube kubectl -- get pods -A
+    Utilise kubectl intégré à Minikube (pas besoin d’installer kubectl sur ta machine).
+    Le -- sépare les options de minikube de celles de kubectl.
+    get pods -A = liste tous les Pods dans tous les namespaces (-A = --all-namespaces).
+
+    echo "alias kubectl='minikube kubectl --'" >> ~/.bashrc
+    Ajoute un alias permanent à la fin de ton ~/.bashrc : désormais, taper kubectl ... revient à exécuter minikube kubectl -- ....
+
+    source ~/.bashrc
+    Recharge ton fichier ~/.bashrc dans le shell courant pour que l’alias soit pris en compte tout de suite (sinon il faudrait ouvrir un nouveau terminal).
+
+    kubectl get pods -A
+    Grâce à l’alias, c’est en réalité minikube kubectl -- get pods -A → liste tous les Pods de ton cluster Minikube.
