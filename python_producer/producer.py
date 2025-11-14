@@ -12,7 +12,7 @@ BOOTSTRAP = os.getenv(
 )
 TOPIC = os.getenv("TOPIC", "demo")
 DATASET_DIR = os.getenv("DATASET_DIR", "./events_logs_dataset")
-FEATURES_FILE = os.path.join(DATASET_DIR, "UNSW-NB15_features.csv")  # <== CORRIGÉ (UNSW)
+FEATURES_FILE = os.path.join(DATASET_DIR, "NUSW-NB15_features.csv")  # <== CORRIGÉ (UNSW)
 CSV_FILES = [
     os.path.join(DATASET_DIR, "UNSW-NB15_1.csv"),
     os.path.join(DATASET_DIR, "UNSW-NB15_2.csv"),
@@ -78,17 +78,18 @@ if __name__ == "__main__":
             csv_path = CSV_FILES[file_idx]
             print(f"➡️ Lecture: {csv_path}")
             # Les fichiers UNSW n’ont pas d’en-tête → header=None puis on applique les colonnes
-            df = pd.read_csv(csv_path, header=None)
-            df.columns = feature_names
+            for chunk in pd.read_csv(csv_path, header=None, chunksize=1000, low_memory=False):
+                df = chunk.copy()
+                df.columns = feature_names
 
-            # Optionnel: ignorer les colonnes label/attaque si tu ne veux que des features
-            if "attack_cat" in df.columns: df = df.drop(columns=["attack_cat"])
-            if "Label" in df.columns: df = df.drop(columns=["Label"])
+                # Optionnel: ignorer les colonnes label/attaque si tu ne veux que des features
+                if "attack_cat" in df.columns: df = df.drop(columns=["attack_cat"])
+                if "Label" in df.columns: df = df.drop(columns=["Label"])
 
-            for i, row in df.iterrows():
-                send_row_as_json(TOPIC, row)
-                if i % 10 == 0:
-                    time.sleep(1)  # petit throttle toutes les 10 lignes
+                for i, row in df.iterrows():
+                    send_row_as_json(TOPIC, row)
+                    if i % 10 == 0:
+                        time.sleep(1)  # petit throttle toutes les 10 lignes
 
             file_idx = (file_idx + 1) % len(CSV_FILES)
 
