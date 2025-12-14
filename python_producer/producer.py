@@ -3,7 +3,6 @@ import pandas as pd
 from confluent_kafka import Producer
 from confluent_kafka.admin import AdminClient, NewTopic
 import numpy as np
-import subprocess
 
 # ---------- Paramètres ----------
 BOOTSTRAP = os.getenv(
@@ -21,6 +20,16 @@ CSV_FILES = [
     os.path.join(DATASET_DIR, "UNSW-NB15_3.csv"),
     os.path.join(DATASET_DIR, "UNSW-NB15_4.csv"),
 ]
+BASE_RATE = int(os.getenv("MSG_RATE"))
+BURST_PROB = float(os.getenv("BURST_PROB"))
+BURST_POWER = float(os.getenv("BURST_POWER"))
+
+print("="*10)
+print("env vars: ")
+print(f"BOOTSTRAP={BOOTSTRAP}")
+print(f"TOPIC={TOPIC}")
+print(f"DATASET_DIR={DATASET_DIR}")
+
 
 # ---------- Producer ----------
 producer_conf = {
@@ -38,39 +47,52 @@ p = Producer(producer_conf)
 def on_delivery(err, msg):
     if err:
         print(f"Delivery failed: {err}")
-    else:
-        print(f"{msg.topic()}[{msg.partition()}] offset={msg.offset()}")
+    #else:
+    #    print(f"{msg.topic()}[{msg.partition()}] offset={msg.offset()}")
 
 # ---------- Utilitaires ----------
-def ensure_topic(admin: AdminClient, topic: str, partitions=6, rf=3):
-    """Crée le topic s'il n'existe pas (RF=3 pour 3 brokers)."""
-    md = admin.list_topics(timeout=10)
-    if topic in md.topics and not md.topics[topic].error:
-        return
-    fs = admin.create_topics([NewTopic(topic, num_partitions=partitions, replication_factor=rf)])
-    # attendre le résultat proprement (ignore si déjà créé en parallèle)
-    try:
-        fs[topic].result()
-        print(f" Topic '{topic}' créé (partitions={partitions}, RF={rf}).")
-    except Exception as e:
-        if "Topic already exists" in str(e):
-            print(f" Topic '{topic}' existe déjà.")
-        else:
-            raise
+def topic_exists(broker_address, topic_name):
+    """
+    Returns True si topic exist, False sinon.
+    """
+    client = AdminClient({'bootstrap.servers': broker_address})
+    metadata = client.list_topics(timeout=10)
+    
+    return topic_name in metadata.topics
 
+def get_log_rate_steady(base_rate, burst_prob=0.05, burst_power=3.0):
+    """
+    Calculates a specific target count for the current second 
+    using Poisson (noise) + Pareto (bursts).
+    """
+    current_lambda = base_rate
+    
+    # 1. Burst Check (Pareto)
+    if np.random.random() < burst_prob:
+        multiplier = (np.random.pareto(a=burst_power) + 1) * 2
+        current_lambda = base_rate * multiplier
 
+    # 2. Natural Variance (Poisson)
+    final_count = np.random.poisson(current_lambda)
+    return int(final_count)
  
 def send_row_as_json(topic: str, row: pd.Series):
-    payload = row.to_dict()
-    p.produce(topic=topic, value=json.dumps(payload).encode("utf-8"), on_delivery=on_delivery)
-    # vidage de la file d’événements internes (callbacks)
-    p.poll(0)
+    try:
+        payload = row.to_dict()
+        p.produce(topic=topic, value=json.dumps(payload).encode("utf-8"), on_delivery=on_delivery)
+        # vidage de la file d’événements internes (callbacks)
+        p.poll(0)
+    except Exception as e:
+        print(f"Erreur lors produce() à kafka: {e}")
 
 # ---------- Main ----------
 if __name__ == "__main__":
-    # (1) Vérifier / créer le topic
-    admin = AdminClient({"bootstrap.servers": BOOTSTRAP})
-    ensure_topic(admin, TOPIC, partitions=6, rf=3)
+    # (1) verifier l'existence du topic
+    if topic_exists(BOOTSTRAP, TOPIC):
+        print("Topic trouve!")
+    else:
+        print("Topic n'existe pas.")
+        raise Exception(f"Topic {TOPIC} n'existe pas dans le broker {BOOTSTRAP}.")
 
     ml_dataset = ['id', 'dur', 'proto', 'service', 'state', 'spkts', 'dpkts', 'sbytes',
        'dbytes', 'rate', 'sttl', 'dttl', 'sload', 'dload', 'sloss', 'dloss',
@@ -88,6 +110,11 @@ if __name__ == "__main__":
 
     try:
         file_idx = 0
+        total_rows_sent = 0
+
+        current_second_target = get_log_rate_steady(BASE_RATE, burst_prob=BURST_PROB, burst_power=BURST_POWER)
+        logs_in_current_second = 0
+        second_start_time = time.time()
         while True:
             csv_path = CSV_FILES[file_idx]
             print(f" Lecture: {csv_path}")
@@ -105,13 +132,34 @@ if __name__ == "__main__":
 
                 for i, row in df.iterrows():
                     send_row_as_json(TOPIC, row)
-                    if i % 10 == 0:
-                        time.sleep(1)  # petit throttle toutes les 10 lignes
+
+                    logs_in_current_second += 1
+                    total_rows_sent += 1
+
+                    # Check if we reached the target for THIS specific second
+                    if logs_in_current_second >= current_second_target:
+                        elapsed = time.time() - second_start_time
+                        
+                        # If we finished fast, sleep the remainder of the second
+                        if elapsed < 1.0:
+                            time.sleep(1.0 - elapsed)
+                        
+                        # Logging for visibility
+                        is_spike = current_second_target > (BASE_RATE * 1.5)
+                        status = " [!!! SPIKE]" if is_spike else ""
+                        print(f"Sec complete. Sent: {logs_in_current_second}/{current_second_target} | Total: {total_rows_sent}{status}")
+
+                        # Reset logic for the NEXT second
+                        logs_in_current_second = 0
+                        second_start_time = time.time()
+                        current_second_target = get_log_rate_steady(BASE_RATE, burst_prob=BURST_PROB, burst_power=BURST_POWER)
 
             file_idx = (file_idx + 1) % len(CSV_FILES)
 
     except KeyboardInterrupt:
         print(" Arrêt demandé.")
+    except Exception as e:
+        print(f"Erreur dans main: {e}")
     finally:
         print(" Vidage des messages en attente…")
         p.flush(30)

@@ -12,7 +12,7 @@ PRODUCER_DIR:= python_producer
 
 # ------- Cluster -------
 start-minikube:
-	minikube start --driver=docker --memory=4096 --cpus=2
+	minikube start --driver=docker --memory=6096 --cpus=8
 	# (optionnel mais utile pour les PVC dynamiques)
 	minikube addons enable storage-provisioner || true
 	minikube addons enable default-storageclass || true
@@ -24,6 +24,8 @@ start-kafka:
 	$(K) wait --for=condition=ready pod -l app=kafka-controller --timeout=300s
 	$(K) apply -f $(KAFKA_DIR)/kafka_broker_statefulset.yaml
 	$(K) wait --for=condition=ready pod -l app=kafka-broker --timeout=300s
+	$(K) apply -f $(KAFKA_DIR)/topic_job.yaml
+	$(K) wait --for=condition=complete job/kafka-topic-creator --timeout=300s
 
 # ------- Spark (master -> workers -> client) -------
 start-spark-pods:
@@ -36,13 +38,9 @@ start-spark-pods:
 
 # ------- Producteur Python -------
 start_python_producer:
-	$(K) apply -f $(PRODUCER_DIR)/producer_pod.yaml
-	$(K) wait --for=condition=ready pod/python-producer --timeout=180s
-
-launch_producer:
-	# copie le script et lance en interactif
-	minikube kubectl -- -n $(NS) cp $(PRODUCER_DIR)/producer.py python-producer:/producer.py
-	$(K) exec -it python-producer -- python3 /producer.py
+	$(K) apply -f $(PRODUCER_DIR)/producer_deployment.yaml
+	$(K) rollout status deploy/python-producer --timeout=300s
+	$(K) logs -f deployment/python-producer
 
 # ------- Job Spark -------
 submit_spark_job:
@@ -78,10 +76,11 @@ stop-minikube:
 delete-resources:
 	-$(K) delete -f $(KAFKA_DIR)/kafka_broker_statefulset.yaml
 	-$(K) delete -f $(KAFKA_DIR)/kafka_controller_statefulset.yaml
+	-$(K) delete -f $(KAFKA_DIR)/topic_job.yaml
 	-$(K) delete -f $(SPARK_DIR)/spark_client_statefulset.yaml
 	-$(K) delete -f $(SPARK_DIR)/spark_worker_deployment.yaml
 	-$(K) delete -f $(SPARK_DIR)/spark_master_deployment.yaml
-	-$(K) delete -f $(PRODUCER_DIR)/producer_pod.yaml
+	-$(K) delete -f $(PRODUCER_DIR)/producer_deployment.yaml
 
 # GROS reset (attention: détruit aussi les PVC)
 nuke:
