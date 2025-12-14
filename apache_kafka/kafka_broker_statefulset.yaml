@@ -5,7 +5,7 @@ metadata:
   name: kafka-broker
 spec:
   serviceName: "kafka-broker-service"
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: kafka-broker
@@ -126,6 +126,7 @@ spec:
               cpu: "500m"
               memory: "512Mi"
 
+  # === Define PVC for each pod in the statefulset ===
   volumeClaimTemplates:
     - metadata:
         name: broker-data

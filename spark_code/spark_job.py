@@ -1,15 +1,13 @@
-import joblib
-import pandas as pd
-import sklearn
-import xgboost
+
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json, pandas_udf, struct
 from pyspark.sql.types import StructType, StringType, DoubleType, IntegerType, FloatType, StructField
+from pyspark.ml import PipelineModel
 
-from model_utils import BinaryClassificationModel, load_model
-
-
+# order does not matter, since
 fields = [
+    ("id", IntegerType()),
+    ("rate", FloatType()),
     ("proto", StringType()),
     ("state", StringType()),
     ("dur", FloatType()),
@@ -50,11 +48,9 @@ fields = [
     ("ct_src_ltm", IntegerType()),
     ("ct_src_dport_ltm", IntegerType()),
     ("ct_dst_sport_ltm", IntegerType()),
-    ("ct_dst_src_ltm", IntegerType()),
+    ("ct_dst_src_ltm", IntegerType())
 ]
 schema = StructType([StructField(name, dtype, True) for name, dtype in fields])
-
-
 
     
 
@@ -65,7 +61,13 @@ if __name__ == "__main__":
         .appName("KafkaOrdersStream")
         .getOrCreate()
     )
+
+    spark.sparkContext.setLogLevel("WARN")
+
     topics_name = "demo"
+
+    # load model
+    pipelie_model = PipelineModel.load("models/pipeline_lr_v1")
 
     logs_raw = (
         spark.readStream
@@ -76,35 +78,31 @@ if __name__ == "__main__":
         .load()
     )
 
+    # parse the "value" column (which contains the message) as JSON
     logs_df = logs_raw.select(
-        from_json(col("value").cast("string"), schema).alias("data")
-    ).select("data.*")
+        from_json(col("value").cast("string"), schema).alias("data"),
+        "topic", "partition", "offset", "timestamp"
+    ).select("data.*", "topic", "partition", "offset", "timestamp")
 
+    # fill missing values
     logs_df = logs_df.fillna(0)
 
-    encoder_model = load_model("label_encoders_binary_class.pkl")
-    classifier_model = load_model("xgboost_unsw_nb15_model_binary_class.pkl")
+    # Apply trained pipeline model
+    predictions_df = pipelie_model.transform(logs_df)
 
-    classification_model = BinaryClassificationModel(encoder_model, classifier_model)
-    broadcasted_model = spark.sparkContext.broadcast(classification_model)
-
-    @pandas_udf(returnType=IntegerType())
-    def predict_with_model(X_values_batch: pd.DataFrame) -> pd.Series:
-        model = broadcasted_model.value
-        predictions = model.predict(X_values_batch)
-
-        if predictions is None:
-            return pd.Series([None] * len(X_values_batch))
-        else:
-            return pd.Series(predictions)
-
-    predictions_df = logs_df.withColumn(
-        "label",
-        predict_with_model(struct(*[col(c) for c, dtype in fields]))
+    # Select only useful columns for console output
+    result_df = predictions_df.select(
+    "prediction",
+    "probability",
+    "topic",
+    "partition",
+    "offset",
+    "timestamp"
     )
 
+
     query = (
-        predictions_df.writeStream
+        result_df.writeStream
         .format("console")
         .outputMode("append")
         .option("truncate", False)

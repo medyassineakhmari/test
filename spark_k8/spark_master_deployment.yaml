@@ -18,9 +18,8 @@ spec:
     spec:
       containers:
         - name: spark-master
-#          image: apache/spark:3.5.0
-          #image: rairacer/myspark:v1
-          image: rabii10/spark-image:v2
+          image: ghcr.io/giangnguyen2007/myspark:v3
+#          image: rabii10/spark-image:v2
           imagePullPolicy: IfNotPresent
           env:
             - name: SPARK_MODE
