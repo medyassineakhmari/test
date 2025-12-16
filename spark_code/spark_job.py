@@ -2,6 +2,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json, pandas_udf, struct
 from pyspark.sql.types import StructType, StringType, DoubleType, IntegerType, FloatType, StructField
+from pyspark.ml.feature import IndexToString
 from pyspark.ml import PipelineModel
 
 # order does not matter, since
@@ -67,7 +68,7 @@ if __name__ == "__main__":
     topics_name = "demo"
 
     # load model
-    pipelie_model = PipelineModel.load("models/pipeline_lr_v1")
+    pipelie_model = PipelineModel.load("models/pipeline_rf_v1")
 
     logs_raw = (
         spark.readStream
@@ -90,9 +91,17 @@ if __name__ == "__main__":
     # Apply trained pipeline model
     predictions_df = pipelie_model.transform(logs_df)
 
+    converter = IndexToString(
+        inputCol="prediction", 
+        outputCol="prediction_label", 
+        labels=pipelie_model.stages[0].labels # see the stages defined in pipeline of training
+    )
+    pred_with_labels = converter.transform(predictions_df)
+
     # Select only useful columns for console output
-    result_df = predictions_df.select(
+    result_df = pred_with_labels.select(
     "prediction",
+    "prediction_label",
     "probability",
     "topic",
     "partition",

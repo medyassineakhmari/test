@@ -46,23 +46,32 @@ df_indexed = label_indexer.fit(df).transform(df)
 df_indexed.select("label", "label_index").show(40, truncate=False)
 df_indexed.groupBy("label", "label_index").count().orderBy("label_index").show()
 
-excluded_cols = ["label", "label_index"]
+excluded_cols = ["label", "label_index", "id"]
 
-feature_cols = [
+numeric_cols = [
     f.name for f in df.schema.fields
     if isinstance(f.dataType, NumericType)  # exclude non-numeric columns
     and f.name not in excluded_cols     # exclude target column
 ]
-print(feature_cols)
+print(numeric_cols)
+
+cat_cols = ["proto", "state", "service"]
+cat_cols_indexed = ["proto_index", "state_index", "service_index"]
+
+feature_indexer = StringIndexer(
+    inputCols=cat_cols,
+    outputCols=cat_cols_indexed,
+    handleInvalid="keep"
+)
 
 imputer = Imputer(
-    inputCols=feature_cols,
-    outputCols=feature_cols
+    inputCols=numeric_cols,
+    outputCols=numeric_cols
 ).setStrategy("mean")
 
 
 assembler = VectorAssembler(
-    inputCols=feature_cols,
+    inputCols=numeric_cols + cat_cols_indexed,
     outputCol="features",
     handleInvalid="keep"
 )
@@ -73,12 +82,12 @@ clf = RandomForestClassifier(
     labelCol="label_index",
     numTrees=50,
     maxDepth=6,
-    maxBins=8,  # try 16 (or even 8 to test)
+    maxBins=256,
     featureSubsetStrategy="sqrt",
     subsamplingRate=0.7
 )
 
-pipeline = Pipeline(stages=[label_indexer] + [imputer, assembler, clf])
+pipeline = Pipeline(stages=[label_indexer, feature_indexer, imputer, assembler, clf])
 
 train_df, test_df = df.randomSplit([0.8, 0.2], seed=42)
 

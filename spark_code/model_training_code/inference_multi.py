@@ -1,5 +1,5 @@
 ﻿from pyspark.ml import Pipeline, PipelineModel
-from pyspark.ml.feature import VectorAssembler, Imputer
+from pyspark.ml.feature import VectorAssembler, Imputer, IndexToString
 from pyspark.sql.types import NumericType
 
 # from spark_ml.drop_column import DropColumns
@@ -41,3 +41,15 @@ pred = model.transform(df_test)
 pred.select("prediction", "probability").show(20, truncate=False)
 
 pred.groupBy("prediction").count().show()
+
+converter = IndexToString(
+    inputCol="prediction", 
+    outputCol="prediction_label", 
+    labels=model.stages[0].labels # see the stages defined in pipeline of training
+)
+
+pred_with_labels = converter.transform(pred)
+
+pred_with_labels.select("prediction", "prediction_label").show(20)
+
+pred_with_labels.groupBy("prediction_label").count().show()

@@ -59,7 +59,7 @@ try:
     csv_file_df.columns = feature_names
     csv_file_df['rate'] = 0 # adding this column since it is missing in the csv files but present in the training dataset
     csv_file_df = csv_file_df.reindex(columns=ml_dataset, fill_value=0)
-    csv_file_df = csv_file_df.drop(columns=["attack_cat", "label"]) # i was hesitating whether to drop these two columns or not
+    csv_file_df = csv_file_df.drop(columns=["attack_cat", "label", "id"]) # i was hesitating whether to drop these two columns or not
 
     while True:
 

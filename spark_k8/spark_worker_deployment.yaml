@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
         - name: spark-worker
-          image: ghcr.io/giangnguyen2007/myspark:v3
+          image: rabii10/myspark:v4.1
+#          image: ghcr.io/giangnguyen2007/myspark:v3
 #          image: rabii10/spark-image:v2
           imagePullPolicy: IfNotPresent
 

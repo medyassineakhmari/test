@@ -52,7 +52,7 @@ if __name__ == "__main__":
     df.columns = feature_names
     df['rate'] = np.nan
     df = df.reindex(columns=ml_dataset, fill_value=0)
-    df = df.drop(columns=["attack_cat", "label"])
+    df = df.drop(columns=["attack_cat", "label", "id"])
 
     print(df.head(10))
 

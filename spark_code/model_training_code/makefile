@@ -8,12 +8,13 @@ activate-local-venv:
 	source .venv/bin/activate
 
 
+# ensure you run on python 3.11  
 install-dependencies:
 	pip install pandas
 	# to run jupyter notebooks with pycharm (optional)
 	#pip install jupyter jupyterlab ipykernel
 	# install pyspark
-	pip install pyspark numpy
+	pip install pyspark==3.5.0 numpy
 
 # install JDK 17 if not have it
 install-jdk-in-wsl:
@@ -22,8 +23,8 @@ install-jdk-in-wsl:
 
 
 train-and-save-pipeline-model:
-	python3 train_and_save_model_binary.py
-	#python3 train_and_save_model_multiclass.py
+	# python3 train_and_save_model_binary.py
+	python3 train_and_save_model_multiclass.py
 
 set-for-wsl:
 	unset SPARK_HOME
@@ -38,5 +39,5 @@ create_test-data:
 
 # test the created model on test data
 run_inferece:
-	python3 inference_binary.py
-	#python3 inference_multi.py
+	# python3 inference_binary.py
+	python3 inference_multi.py
