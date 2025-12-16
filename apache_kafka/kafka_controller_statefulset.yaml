@@ -77,6 +77,7 @@ spec:
             - name: controller-data
               mountPath: /var/lib/kafka/data
 
+  # Define PVC for the controller
   volumeClaimTemplates:
     - metadata:
         name: controller-data

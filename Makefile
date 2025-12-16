@@ -3,7 +3,8 @@ NS ?= default
 K  := minikube kubectl --  -n $(NS)
 
 KAFKA_DIR   := apache_kafka
-SPARK_DIR   := spark
+SPARK_DIR   := spark_k8
+SPARK_CODE_DIR := spark_code
 PRODUCER_DIR:= python_producer
 
 .PHONY: start-minikube start-kafka start-spark-pods start_python_producer \
@@ -45,11 +46,9 @@ start-python-producer:
 # ------- Job Spark -------
 submit-spark-job:
 	# copie le job et le script de submit dans le pod client
-	$(K) cp $(SPARK_DIR)/spark_job.py spark-client-0:/opt/spark/work-dir/spark_job.py
-	$(K) cp $(SPARK_DIR)/model_utils.py spark-client-0:/opt/spark/work-dir/model_utils.py
-	$(K) cp $(SPARK_DIR)/pretrained_models/ spark-client-0:/opt/spark/work-dir/pretrained_models/
+	$(K) cp $(SPARK_CODE_DIR)/spark_job.py spark-client-0:/opt/spark/work-dir/spark_job.py
 
-	$(K) cp $(SPARK_DIR)/spark_submit.sh spark-client-0:/opt/spark/work-dir/spark_submit.sh
+	$(K) cp $(SPARK_CODE_DIR)/spark_submit.sh spark-client-0:/opt/spark/work-dir/spark_submit.sh
 	# lance le job (peut prendre du temps la 1ère fois : téléchargement des packages)
 	$(K) exec -it spark-client-0 -- /bin/bash /opt/spark/work-dir/spark_submit.sh
 

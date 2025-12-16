@@ -128,6 +128,7 @@ spec:
               cpu: "500m"
               memory: "512Mi"
 
+  # === Define PVC for each pod in the statefulset ===
   volumeClaimTemplates:
     - metadata:
         name: broker-data
