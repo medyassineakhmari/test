@@ -6,10 +6,11 @@ KAFKA_DIR   := apache_kafka
 SPARK_DIR   := spark_k8
 SPARK_CODE_DIR := spark_code
 PRODUCER_DIR:= python_producer
+MONGODB_DIR := mongodb
 
-.PHONY: start-minikube start-kafka start-spark-pods start_python_producer \
-        launch_producer submit_spark_job status pf-master pf-driver stop-minikube \
-        delete-resources nuke
+.PHONY: start-minikube start-kafka start-spark-pods start-mongodb start-python-producer \
+        launch_producer submit_spark_job status pf-master pf-driver pf-mongodb stop-minikube \
+        delete-resources delete-mongodb nuke query-stats query-attacks
 
 # ------- Cluster -------
 start-minikube:
@@ -30,6 +31,9 @@ start-kafka:
 
 # ------- Spark (master -> workers -> client) -------
 start-spark-pods:
+	# Deploy sealed secret (encrypted, safe to commit to git)
+	$(K) apply -f $(MONGODB_DIR)/mongodb-sealed-secret.yaml
+	$(K) wait --for=condition=sealedsecretsynced sealedsecret/mongodb-secret --timeout=30s
 	$(K) apply -f $(SPARK_DIR)/spark_master_deployment.yaml
 	$(K) rollout status deploy/spark-master --timeout=180s
 	$(K) apply -f $(SPARK_DIR)/spark_worker_deployment.yaml
@@ -47,7 +51,6 @@ start-python-producer:
 submit-spark-job:
 	# copie le job et le script de submit dans le pod client
 	$(K) cp $(SPARK_CODE_DIR)/spark_job.py spark-client-0:/opt/spark/work-dir/spark_job.py
-
 	$(K) cp $(SPARK_CODE_DIR)/spark_submit.sh spark-client-0:/opt/spark/work-dir/spark_submit.sh
 	# lance le job (peut prendre du temps la 1ère fois : téléchargement des packages)
 	$(K) exec -it spark-client-0 -- /bin/bash /opt/spark/work-dir/spark_submit.sh
@@ -98,6 +101,38 @@ pf-driver:
 	# UI Driver sur http://localhost:4040
 	$(K) port-forward pod/spark-client-0 4040:4040
 
+pf-mongodb:
+	# MongoDB shell sur mongodb://localhost:27017
+	$(K) port-forward svc/mongodb-service 27017:27017
+
+# ------- MongoDB -------
+start-mongodb:
+	$(K) apply -f $(MONGODB_DIR)/mongodb_statefulset.yaml
+	$(K) wait --for=condition=ready pod -l app=mongodb --timeout=300s
+	@echo "MongoDB started! Use 'make pf-mongodb' to access locally."
+
+delete-mongodb:
+	-$(K) delete -f $(MONGODB_DIR)/mongodb_statefulset.yaml
+	-$(K) delete secret mongodb-secret
+
+# ------- Requêtes MongoDB -------
+query-stats:
+	@echo "📊 Fetching prediction statistics..."
+	$(K) exec -it mongodb-0 -- mongosh \
+	  --username $$($(K) get secret mongodb-secret -o jsonpath='{.data.username}' | base64 -d) \
+	  --password $$($(K) get secret mongodb-secret -o jsonpath='{.data.password}' | base64 -d) \
+	  --authenticationDatabase admin \
+	  cybersecurity_db --eval "db.predictions.find().count()"
+
+query-attacks:
+	@echo "🎯 Fetching attack distribution..."
+	$(K) exec -it mongodb-0 -- mongosh \
+	  --username $$($(K) get secret mongodb-secret -o jsonpath='{.data.username}' | base64 -d) \
+	  --password $$($(K) get secret mongodb-secret -o jsonpath='{.data.password}' | base64 -d) \
+	  --authenticationDatabase admin \
+	  cybersecurity_db --eval \
+	  "db.predictions.aggregate([{$$group: {_id: '$$attack_type', count: {$$sum: 1}}}, {$$sort: {count: -1}}])"
+
 # ------- Stop/Clean -------
 stop-minikube:
 	minikube stop
@@ -111,8 +146,11 @@ delete-resources:
 	-$(K) delete -f $(SPARK_DIR)/spark_worker_deployment.yaml
 	-$(K) delete -f $(SPARK_DIR)/spark_master_deployment.yaml
 	-$(K) delete -f $(PRODUCER_DIR)/producer_deployment.yaml
+	-$(K) delete -f $(MONGODB_DIR)/mongodb_statefulset.yaml
+	-$(K) delete secret mongodb-secret
 
 # GROS reset (attention: détruit aussi les PVC)
 nuke:
 	$(K) delete all --all
 	$(K) delete pvc --all
+	$(K) delete secret mongodb-secret

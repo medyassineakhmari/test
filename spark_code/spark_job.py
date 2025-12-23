@@ -4,6 +4,8 @@ from pyspark.sql.functions import col, from_json, pandas_udf, struct
 from pyspark.sql.types import StructType, StringType, DoubleType, IntegerType, FloatType, StructField
 from pyspark.ml.feature import IndexToString
 from pyspark.ml import PipelineModel
+from pymongo import MongoClient
+import json
 
 
 BOOTSTRAP = (
@@ -70,7 +72,6 @@ if __name__ == "__main__":
         .getOrCreate()
     )
     
-
     # load model
     pipelie_model = PipelineModel.load("models/pipeline_rf_v1")
 
@@ -102,7 +103,7 @@ if __name__ == "__main__":
     )
     pred_with_labels = converter.transform(predictions_df)
 
-    # Select only useful columns for console output
+    # Select only useful columns for output
     result_df = pred_with_labels.select(
     "prediction",
     "prediction_label",
@@ -113,13 +114,37 @@ if __name__ == "__main__":
     "timestamp"
     )
 
+    # Define function to write batch to MongoDB using pymongo
+    def write_to_mongodb(batch_df, batch_id):
+        """Write batch dataframe to MongoDB using pymongo"""
+        try:
+            # Read MongoDB credentials from environment variables (injected from Sealed Secret)
+            import os
+            mongo_url = os.getenv('MONGO_URL', 'mongodb://admin:password@mongodb-service:27017/')
+            client = MongoClient(mongo_url)
+            db = client["cybersecurity_db"]
+            collection = db["predictions"]
+            
+            # Convert Spark DataFrame to list of dicts and insert into MongoDB
+            records = batch_df.toJSON().map(lambda x: json.loads(x)).collect()
+            if records:
+                collection.insert_many(records)
+                print(f"✅ Batch {batch_id}: Successfully wrote {len(records)} predictions to MongoDB")
+            else:
+                print(f"⚠️  Batch {batch_id}: No records to write")
+            
+            client.close()
+        except Exception as e:
+            print(f"❌ Batch {batch_id}: Failed to write to MongoDB - {str(e)}")
 
+    # Write to both console (for monitoring) and MongoDB (for storage)
     query = (
         result_df.writeStream
         .format("console")
         .outputMode("append")
         .option("truncate", False)
-        .option("checkpointLocation", "/tmp/checkpoints/logs-stream")  # shared folder or local
+        .option("checkpointLocation", "/tmp/checkpoints/logs-stream")
+        .foreachBatch(write_to_mongodb)
         .start()
     )
 
