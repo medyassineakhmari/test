@@ -5,9 +5,10 @@ USER root
 RUN apt-get update && \
     apt-get install -y python3 python3-distutils python3-venv python3-pip && \
     ln -s /usr/bin/python3 /usr/bin/python && \
-    pip3 install --no-cache-dir pyspark==3.5.0 numpy pandas
+    pip3 install --no-cache-dir pyspark==3.5.0 numpy pandas dnspython pymongo
 
 COPY ./models /opt/spark/work-dir/models
+RUN find /opt/spark/work-dir/models -name ".*.crc" -delete
 # Spark containers often run as 'spark' user, switch back:
 USER spark
 ENV PYSPARK_PYTHON=/usr/bin/python

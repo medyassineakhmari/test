@@ -4,54 +4,17 @@ metadata:
   name: mongodb-config
 data:
   init-db.js: |
-    // Initialize MongoDB database with collections and indexes
+    // Initialize MongoDB database
     db = db.getSiblingDB('cybersecurity_db');
     
-    // Create predictions collection
-    db.createCollection('predictions', {
-      validator: {
-        $jsonSchema: {
-          bsonType: 'object',
-          required: ['attack_type', 'timestamp', 'confidence'],
-          properties: {
-            _id: { bsonType: 'objectId' },
-            attack_type: { bsonType: 'string', description: 'Type of attack detected' },
-            confidence: { bsonType: 'double', description: 'Prediction probability' },
-            timestamp: { bsonType: 'date', description: 'Kafka message timestamp' },
-            source_features: {
-              bsonType: 'object',
-              properties: {
-                proto: { bsonType: 'string' },
-                state: { bsonType: 'string' },
-                service: { bsonType: 'string' },
-                duration: { bsonType: 'double' },
-                source_bytes: { bsonType: 'int' },
-                dest_bytes: { bsonType: 'int' },
-                source_packets: { bsonType: 'int' },
-                dest_packets: { bsonType: 'int' }
-              }
-            },
-            kafka_metadata: {
-              bsonType: 'object',
-              properties: {
-                topic: { bsonType: 'string' },
-                partition: { bsonType: 'int' },
-                offset: { bsonType: 'long' }
-              }
-            },
-            created_at: { bsonType: 'date', description: 'Document creation timestamp' }
-          }
-        }
-      }
-    });
+    db.createCollection('predictions');
     
-    // Create indexes for faster queries
     db.predictions.createIndex({ 'attack_type': 1 });
     db.predictions.createIndex({ 'timestamp': -1 });
     db.predictions.createIndex({ 'confidence': -1 });
     db.predictions.createIndex({ 'kafka_metadata.offset': -1 });
     
-    // Create alerts collection for high-risk attacks
+    // Create alerts collection
     db.createCollection('alerts');
     db.alerts.createIndex({ 'created_at': -1 });
     db.alerts.createIndex({ 'attack_type': 1 });

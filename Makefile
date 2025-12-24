@@ -31,9 +31,9 @@ start-kafka:
 
 # ------- Spark (master -> workers -> client) -------
 start-spark-pods:
-	# Deploy sealed secret (encrypted, safe to commit to git)
-	$(K) apply -f $(MONGODB_DIR)/mongodb-sealed-secret.yaml
-	$(K) wait --for=condition=sealedsecretsynced sealedsecret/mongodb-secret --timeout=30s
+#	$(K) apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.34.0/controller.yaml --namespace=kube-system
+	$(K) apply -f $(MONGODB_DIR)/mongodb-secret.yaml
+#	$(K) wait --for=condition=Synced secret/mongodb-secret --timeout=30s
 	$(K) apply -f $(SPARK_DIR)/spark_master_deployment.yaml
 	$(K) rollout status deploy/spark-master --timeout=180s
 	$(K) apply -f $(SPARK_DIR)/spark_worker_deployment.yaml
@@ -92,6 +92,7 @@ status:
 	@echo "== Pods ==" && $(K) get pods -o wide
 	@echo "== PVC =="  && $(K) get pvc
 	@echo "== Services ==" && $(K) get svc
+	@echo "== Secrets ==" && $(K) get secrets
 
 pf-master:
 	# UI Master sur http://localhost:8080
@@ -117,7 +118,7 @@ delete-mongodb:
 
 # ------- Requêtes MongoDB -------
 query-stats:
-	@echo "📊 Fetching prediction statistics..."
+	@echo "Fetching prediction statistics..."
 	$(K) exec -it mongodb-0 -- mongosh \
 	  --username $$($(K) get secret mongodb-secret -o jsonpath='{.data.username}' | base64 -d) \
 	  --password $$($(K) get secret mongodb-secret -o jsonpath='{.data.password}' | base64 -d) \
@@ -125,7 +126,7 @@ query-stats:
 	  cybersecurity_db --eval "db.predictions.find().count()"
 
 query-attacks:
-	@echo "🎯 Fetching attack distribution..."
+	@echo "Fetching attack distribution..."
 	$(K) exec -it mongodb-0 -- mongosh \
 	  --username $$($(K) get secret mongodb-secret -o jsonpath='{.data.username}' | base64 -d) \
 	  --password $$($(K) get secret mongodb-secret -o jsonpath='{.data.password}' | base64 -d) \

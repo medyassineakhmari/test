@@ -15,18 +15,26 @@ make start-kafka
 ```
 
 3. lancer les pods de spark:
+
+Avant de lancer spark, il faut assurer qu'un fichier `mongodb-secret.yaml` existe dans le dossier mongodb pour avoir les données nécessaire pour se connecter à la base de données.
+> NOTE : Le fichier sera partager séparement.
 ```
 make start-spark-pods
 ```
 > Note: Il se peut que certain pods ne se lance plus et reste bloquer dans la phase de creation. Vous pouvez toujours verifier ça avec `make status` et trouver le pods avec status `ContainerCreating`. Puis le supprimer en utilisant `Kubectl delete -f spark_k8/spark_client_statefulset.yaml` par exemple. Enfin relancer le make command associé.
 
-4. lancer le pod de producer :
+4. lancer la base de données mongodb
+```
+make start-mongodb
+```
+
+5. lancer le pod de producer :
 ```
 make start-python-producer
 ```
 > Note: Maintenant juste avec cette command le pod de producer est crée puis lancé directement et il commence le streaming des données vers Kafka.
 
-5. lancer les pods de spark:
+6. lancer les pods de spark:
 ```
 make submit-spark-job
 ```
@@ -38,7 +46,7 @@ make status
 ```
 Vous pouvez voir le status des pods , les PVC et les services.
 
-6. lancer le monitoring de prometheus: 
+7. lancer le monitoring de prometheus: 
 ```
 make setup-monitoring
 ```
@@ -46,7 +54,7 @@ make setup-monitoring
 
 Si vous sur windows ou linux, installer suivant ce guide: [helm.sh](https://helm.sh/docs/intro/install/#from-apt-debianubuntu)
 
-7. acceder l'interface de monitoring de Grafana: 
+8. acceder l'interface de monitoring de Grafana: 
 ```
 make access-grafana
 ```

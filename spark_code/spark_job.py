@@ -104,15 +104,7 @@ if __name__ == "__main__":
     pred_with_labels = converter.transform(predictions_df)
 
     # Select only useful columns for output
-    result_df = pred_with_labels.select(
-    "prediction",
-    "prediction_label",
-    "probability",
-    "topic",
-    "partition",
-    "offset",
-    "timestamp"
-    )
+    result_df = pred_with_labels
 
     # Define function to write batch to MongoDB using pymongo
     def write_to_mongodb(batch_df, batch_id):
