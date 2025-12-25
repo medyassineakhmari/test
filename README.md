@@ -83,6 +83,8 @@ make nuke
     - ``BURST_POWER`` (la puissance de ces augmentations soudaine de taux des logs envoyé, une valeur plus petit > des pics de MSG_RATE plus massives avec valeur minimum de 1.1)
 > Note: si votre système crash à cause des gros volume des message, réduire le MSG_RATE à 5 ou 10.
 
+---
+---
 ### Kafka:
 #### Brokers
 - Statefulset
@@ -107,6 +109,8 @@ make nuke
     - partitions : 6
     - replication factor : 3
 
+---
+---
 ### Spark:
 #### Dossier spark_code:
 ce dossier contient:
@@ -117,27 +121,63 @@ ce dossier contient:
 ##### Client
 - Statefulset
     - replica : 1
-    - utilise l'image : ``rabii10/myspark:v4.1``
+    - utilise l'image : ``rabii10/myspark:v5.3``
 - Service
     - pas d'IP externe
 
 ##### Master
 - Statefulset
     - replica : 1
-    - utilise l'image : ``rabii10/myspark:v4.1``
+    - utilise l'image : ``rabii10/myspark:v5.3``
 - Service
     - cluster IP existe
 
 ##### Worker
 - Statefulset
     - replica : 1
-    - utilise l'image : ``rabii10/myspark:v4.1``
+    - utilise l'image : ``rabii10/myspark:v5.3``
 - Service
     - cluster IP existe
 
+---
+---
 ### Monitoring:
 Monitoring avec prometheus et affichage avec Grafana.
 
+- Prometheus : collecte et stockage des métriques
+- Grafana : visualisation des métriques et tableaux de bord
+- Alertmanager : gestion des alertes
+- Node Exporter : métriques au niveau du système
+- Kube State Metrics : métriques du cluster Kubernetes
+
+---
+---
+### Database:
+- Statefulset
+    - replica : 1
+    - utilise l'image : ``mongo:7.0``
+- Service
+    - pas d'IP externe
+- URI: `mongodb://username:password@mongodb-service:27017`
+- Database: `cybersecurity_db`
+- Collection: `predictions`
+- Driver: PyMongo 4.x (pre-installed in spark-base Docker image)
+- Batch Mode: `foreachBatch` callback (automatic per micro-batch)
+> Note: le dossier de mongodb doit contenir le fichier `mongodb-secret.yaml` avec le structure suivant: 
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongodb-secret
+type: Opaque
+data:
+  username: # encodé en base64
+  password: # encodé en base64
+  url: # mongodb://username:password@mongodb-service:27017/ encodé en base64
+```
+
+---
+---
 ## Contributing
 
 Pour les devs :
