@@ -1,0 +1,128 @@
+---
+- name: Prérequis Kubernetes sur Master et Workers
+  hosts: master,workers
+  become: yes
+  tasks:
+    - name: Désactiver Swap
+      shell: |
+        swapoff -a
+        sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+
+    - name: Charger modules noyau et configurer sysctl
+      shell: |
+        # Chargement immédiat des modules
+        modprobe overlay
+        modprobe br_netfilter
+        
+        # Configuration persistante des modules au démarrage
+        cat <<EOF | tee /etc/modules-load.d/k8s.conf
+        overlay
+        br_netfilter
+        EOF
+        
+        # Configuration des paramètres réseau requis par K8s
+        cat <<EOF | tee /etc/sysctl.d/k8s.conf
+        net.bridge.bridge-nf-call-iptables  = 1
+        net.bridge.bridge-nf-call-ip6tables = 1
+        net.ipv4.ip_forward                 = 1
+        EOF
+        
+        # Application immédiate des changements
+        sysctl --system
+
+    # --- CORRECTION : ATTENTE DU VERROU APT ---
+    - name: Attendre que le verrou APT soit libéré (mises à jour automatiques)
+      shell: while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 5; done;
+      changed_when: false
+
+    - name: Vérifier la connectivité internet (via NAT Gateway)
+      uri:
+        url: http://www.google.com
+        status_code: 200
+      register: internet_check
+      until: internet_check.status == 200
+      retries: 10
+      delay: 5
+
+    - name: Mettre à jour le cache APT avec répétitions en cas d'échec
+      apt:
+        update_cache: yes
+      register: apt_res
+      until: apt_res is success
+      retries: 5
+      delay: 10
+
+    - name: Installer Containerd
+      apt:
+        name: containerd
+        state: present
+
+    - name: Configurer Containerd (SystemdCgroup)
+      shell: |
+        mkdir -p /etc/containerd
+        containerd config default > /etc/containerd/config.toml
+        sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
+        systemctl restart containerd
+
+    - name: Installer Kubeadm, Kubelet et Kubectl
+      shell: |
+        apt-get update && apt-get install -y apt-transport-https curl
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg --yes
+        echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list
+        apt-get update
+        apt-get install -y kubelet kubeadm kubectl
+        apt-mark hold kubelet kubeadm kubectl
+
+- name: Initialisation du Master
+  hosts: master
+  become: yes
+  tasks:
+    - name: Kubeadm Init
+      shell: kubeadm init --pod-network-cidr=192.168.0.0/16 --apiserver-advertise-address=10.240.0.10
+      args:
+        creates: /etc/kubernetes/admin.conf
+
+    - name: Configurer Kubeconfig pour Ubuntu
+      shell: |
+        mkdir -p /home/ubuntu/.kube
+        cp -i /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+        chown ubuntu:ubuntu /home/ubuntu/.kube/config
+
+    - name: Installer Calico et Metrics Server
+      become_user: ubuntu
+      shell: |
+        kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml
+        kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+    - name: Patch Metrics Server (Insecure TLS)
+      become_user: ubuntu
+      shell: |
+        kubectl patch deployment metrics-server -n kube-system --type='json' \
+        -p '[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"}]'
+
+    - name: Générer commande join
+      shell: kubeadm token create --print-join-command
+      register: join_cmd
+
+    - name: Stocker fact
+      set_fact:
+        join_command: "{{ join_cmd.stdout }}"
+
+- name: Jonction des Workers
+  hosts: workers
+  become: yes
+  tasks:
+    - name: Join Cluster
+      shell: "{{ hostvars['10.240.0.10']['join_command'] }}"
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+
+- name: Setup Gateway (Bastion)
+  hosts: gateway
+  become: yes
+  tasks:
+    - name: Installer Kubectl sur Gateway
+      shell: |
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg --yes
+        echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list
+        apt-get update && apt-get install -y kubectl

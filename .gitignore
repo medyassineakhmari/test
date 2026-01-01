@@ -1,0 +1,3 @@
+ansible/id_rsa_gcp
+terraform/.terraform
+gcp-key.json
