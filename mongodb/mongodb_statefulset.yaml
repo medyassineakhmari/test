@@ -7,7 +7,10 @@ data:
     // Initialize MongoDB database
     db = db.getSiblingDB('cybersecurity_db');
     
-    db.createCollection('predictions');
+    db.createCollection('predictions', { 
+        capped: true, 
+        size: 4294967296  // 4Gi
+    });
     
     db.predictions.createIndex({ 'attack_type': 1 });
     db.predictions.createIndex({ 'timestamp': -1 });
