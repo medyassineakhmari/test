@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topic-creator
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: topic-creator
+        image: apache/kafka:3.8.0
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            BOOTSTRAP_SERVER="kafka-broker-service:19092"
+            EXPECTED_BROKERS=3
+
+            echo "Waiting for $EXPECTED_BROKERS Kafka Brokers to be ready..."
+            
+            while [ $(/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server $BOOTSTRAP_SERVER | grep "id:" | wc -l) -lt $EXPECTED_BROKERS ]; do
+              echo "Not enough brokers ready yet. Sleeping 2s..."
+              sleep 2
+            done
+            
+            echo "Brokers are online! Creating topic..."
+            
+            /opt/kafka/bin/kafka-topics.sh --create \
+              --bootstrap-server $BOOTSTRAP_SERVER \
+              --topic demo \
+              --partitions 6 \
+              --replication-factor 3 \
+              --if-not-exists

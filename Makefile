@@ -1,80 +1,157 @@
+# ====== Variables ======
+NS ?= default
+K  := minikube kubectl --  -n $(NS)
 
-# this makefile may not work on Windows
-# execute in this order to start the full pipeline:
+KAFKA_DIR   := apache_kafka
+SPARK_DIR   := spark_k8
+SPARK_CODE_DIR := spark_code
+PRODUCER_DIR:= python_producer
+MONGODB_DIR := mongodb
 
-start_minikube:
-	minikube start --driver=docker --memory=4096 --cpus=2
+.PHONY: start-minikube start-kafka start-spark-pods start-mongodb start-python-producer \
+        launch_producer submit_spark_job status pf-master pf-driver pf-mongodb stop-minikube \
+        delete-resources delete-mongodb nuke query-stats query-attacks
 
-# make take a while to download the images and start the pods
-start_kafka:
-	kubectl apply -f apache_kafka/kafka_broker_statefulset.yaml
-	kubectl apply -f apache_kafka/kafka_controller_statefulset.yaml
+# ------- Cluster -------
+start-minikube:
+	minikube start --driver=docker --memory=6096 --cpus=8
+	# (optionnel mais utile pour les PVC dynamiques)
+	minikube addons enable storage-provisioner || true
+	minikube addons enable default-storageclass || true
+	minikube addons enable metrics-server || true
 
-# make take a while to download the images and start the pods
-start_spark_pods:
-	# the base image for all spark pods is built from spark_k8/Dockerfile
-	# i have built and pushed the image to my public docker hub asghcr.io/giangnguyen2007/myspark:v3
-	kubectl apply -f spark_k8/spark_master_deployment.yaml
-	kubectl apply -f spark_k8/spark_worker_deployment.yaml
-	kubectl apply -f spark_k8/spark_client_statefulset.yaml
-	echo "Waiting for Spark master..."
-	kubectl rollout status deployment/spark-master --timeout=300s
-	echo "Waiting for Spark workers..."
-	kubectl rollout status deployment/spark-worker --timeout=300s
-	echo "Waiting for Spark client..."
-	kubectl rollout status statefulset/spark-client --timeout=300s
-	echo "All Spark pods are running."
+# ------- Kafka (contrôleurs -> brokers) -------
+start-kafka:
+	$(K) apply -f $(KAFKA_DIR)/kafka_controller_statefulset.yaml
+	$(K) wait --for=condition=ready pod -l app=kafka-controller --timeout=300s
+	$(K) apply -f $(KAFKA_DIR)/kafka_broker_statefulset.yaml
+	$(K) wait --for=condition=ready pod -l app=kafka-broker --timeout=300s
+	$(K) apply -f $(KAFKA_DIR)/topic_job.yaml
+	$(K) wait --for=condition=complete job/kafka-topic-creator --timeout=300s
 
+# ------- Spark (master -> workers -> client) -------
+start-spark-pods:
+#	$(K) apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.34.0/controller.yaml --namespace=kube-system
+	$(K) apply -f $(MONGODB_DIR)/mongodb-secret.yaml
+#	$(K) wait --for=condition=Synced secret/mongodb-secret --timeout=30s
+	$(K) apply -f $(SPARK_DIR)/spark_master_deployment.yaml
+	$(K) rollout status deploy/spark-master --timeout=180s
+	$(K) apply -f $(SPARK_DIR)/spark_worker_deployment.yaml
+	$(K) rollout status deploy/spark-worker --timeout=300s
+	$(K) apply -f $(SPARK_DIR)/spark_client_statefulset.yaml
+	$(K) wait --for=condition=ready pod -l app=spark-client --timeout=180s
 
+# ------- Producteur Python -------
+start-python-producer:
+	$(K) apply -f $(PRODUCER_DIR)/producer_deployment.yaml
+	$(K) rollout status deploy/python-producer --timeout=300s
+	$(K) logs -f deployment/python-producer
 
-
-start_python_producer:
-	kubectl apply -f python_producer/producer_pod.yaml
-
-launch_producer:
-	#copy the producer.py into the producer pod
-	kubectl cp python_producer/producer.py python-producer:/producer.py
-	#execute the producer.py inside the producer pod
-	# script download CSV data from internet and produce messages to Kafka topic
-	# keep it running to continuously produce messages to Kafka
-	kubectl exec -it python-producer -- python3 /producer.py
-
-submit_spark_job:
-	#copy the spark_job.py into the spark-client pod
-	kubectl cp spark_code/spark_job.py spark-client-0:/opt/spark/work-dir/spark_job.py
-
-	#copy the models folder into the spark-client pod
-	# no longer necessary as the model is copied inside the docker image
-	#kubectl cp spark_code/models/ spark-client-0:/opt/spark/work-dir/models/
-
-	kubectl cp spark_code/spark_submit.sh spark-client-0:/opt/spark/work-dir/spark_submit.sh
-
-	#execute the spark_job.py inside the spark-client pod
-	#may take a while to execute (download dependencies, connect to master, dag scheduling, etc)
-	# it will process new message as they arrive in Kafka topic
-	# if no more message, it will just wait for new messages
-	kubectl exec -it spark-client-0 -- /bin/bash /opt/spark/work-dir/spark_submit.sh
+# ------- Job Spark -------
+submit-spark-job:
+	# copie le job et le script de submit dans le pod client
+	$(K) cp $(SPARK_CODE_DIR)/spark_job.py spark-client-0:/opt/spark/work-dir/spark_job.py
+	$(K) cp $(SPARK_CODE_DIR)/spark_submit.sh spark-client-0:/opt/spark/work-dir/spark_submit.sh
+	# lance le job (peut prendre du temps la 1ère fois : téléchargement des packages)
+	$(K) exec -it spark-client-0 -- /bin/bash /opt/spark/work-dir/spark_submit.sh
 
 
+# ============================================
+# MONITORING TARGETS (Added by Wail)
+# ============================================
+# NOTE: before running this
+# if you are on windows install helm (choco install kubernetes-helm)
+# if you are on linux install helm (see https://helm.sh/docs/intro/install/#from-apt-debianubuntu)
+setup-monitoring:
+	$(K) create namespace monitoring || echo "Namespace already exists"
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || echo "Repo already added"
+	helm repo update
+	helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --namespace monitoring --set prometheus.prometheusSpec.retention=30d --set grafana.adminPassword=admin --set grafana.service.type=NodePort --wait --timeout=10m
+	@echo "=========================================="
+	@echo "Monitoring deployed successfully!"
+	@echo "Access Grafana: make access-grafana"
+	@echo "Then open: http://localhost:3000"
+	@echo "Username: admin | Password: admin"
+	@echo "=========================================="
+
+access-grafana:
+	@echo "Opening Grafana at http://localhost:3000"
+	@echo "Username: admin | Password: admin"
+	$(K) port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80
+
+access-prometheus:
+	@echo "Opening Prometheus at http://localhost:9090"
+	$(K) port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090
+
+delete-monitoring:
+	helm uninstall kube-prometheus-stack -n monitoring || echo "Stack not found"
+	$(K) delete namespace monitoring || echo "Namespace not found"
+	
+# ------- Aides -------
+status:
+	@echo "== Pods ==" && $(K) get pods -o wide
+	@echo "== PVC =="  && $(K) get pvc
+	@echo "== Services ==" && $(K) get svc
+	@echo "== Secrets ==" && $(K) get secrets
+
+pf-master:
+	# UI Master sur http://localhost:8080
+	$(K) port-forward svc/spark-master-service 8080:8080
+
+pf-driver:
+	# UI Driver sur http://localhost:4040
+	$(K) port-forward pod/spark-client-0 4040:4040
+
+pf-mongodb:
+	# MongoDB shell sur mongodb://localhost:27017
+	$(K) port-forward svc/mongodb-service 27017:27017
+
+# ------- MongoDB -------
+start-mongodb:
+	$(K) apply -f $(MONGODB_DIR)/mongodb_statefulset.yaml
+	$(K) wait --for=condition=ready pod -l app=mongodb --timeout=300s
+	@echo "MongoDB started! Use 'make pf-mongodb' to access locally."
+
+delete-mongodb:
+	-$(K) delete -f $(MONGODB_DIR)/mongodb_statefulset.yaml
+	-$(K) delete secret mongodb-secret
+
+# ------- Requêtes MongoDB -------
+query-stats:
+	@echo "Fetching prediction statistics..."
+	$(K) exec -it mongodb-0 -- mongosh \
+	  --username $$($(K) get secret mongodb-secret -o jsonpath='{.data.username}' | base64 -d) \
+	  --password $$($(K) get secret mongodb-secret -o jsonpath='{.data.password}' | base64 -d) \
+	  --authenticationDatabase admin \
+	  cybersecurity_db --eval "db.predictions.find().count()"
+
+query-attacks:
+	@echo "Fetching attack distribution..."
+	$(K) exec -it mongodb-0 -- mongosh \
+	  --username $$($(K) get secret mongodb-secret -o jsonpath='{.data.username}' | base64 -d) \
+	  --password $$($(K) get secret mongodb-secret -o jsonpath='{.data.password}' | base64 -d) \
+	  --authenticationDatabase admin \
+	  cybersecurity_db --eval \
+	  "db.predictions.aggregate([{$$group: {_id: '$$attack_type', count: {$$sum: 1}}}, {$$sort: {count: -1}}])"
+
+# ------- Stop/Clean -------
 stop-minikube:
 	minikube stop
 
-restart-minikube:
-	minikube delete
-
+# Supprime ce que tu as créé via apply (propre)
 delete-resources:
-	kubectl delete all --all
+	-$(K) delete -f $(KAFKA_DIR)/kafka_broker_statefulset.yaml
+	-$(K) delete -f $(KAFKA_DIR)/kafka_controller_statefulset.yaml
+	-$(K) delete -f $(KAFKA_DIR)/topic_job.yaml
+	-$(K) delete -f $(SPARK_DIR)/spark_client_statefulset.yaml
+	-$(K) delete -f $(SPARK_DIR)/spark_worker_deployment.yaml
+	-$(K) delete -f $(SPARK_DIR)/spark_master_deployment.yaml
+	-$(K) delete -f $(PRODUCER_DIR)/producer_deployment.yaml
+	-$(K) delete -f $(MONGODB_DIR)/mongodb_statefulset.yaml
+	-$(K) delete secret mongodb-secret
 
-
-# check current running pods
-check:
-	kubectl get pods
-
-
-delete_spark_pods:
-	kubectl delete -f spark_k8/spark_master_deployment.yaml
-	kubectl delete -f spark_k8/spark_worker_deployment.yaml
-	kubectl delete -f spark_k8/spark_client_statefulset.yaml
-
-exec_spark_client:
-	kubectl exec -it spark-client-0 -- /bin/bash
+# GROS reset (attention: détruit aussi les PVC)
+nuke:
+	$(K) delete all --all
+	$(K) delete pvc --all
+	$(K) delete secret mongodb-secret
