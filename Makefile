@@ -7,6 +7,7 @@ SPARK_DIR   := spark_k8
 SPARK_CODE_DIR := spark_code
 PRODUCER_DIR:= python_producer
 MONGODB_DIR := mongodb
+FASTAPI_DIR := fastapi
 
 .PHONY: start-minikube start-kafka start-spark-pods start-mongodb start-python-producer \
         launch_producer submit_spark_job status pf-master pf-driver pf-mongodb stop-minikube \
@@ -19,6 +20,7 @@ start-minikube:
 	minikube addons enable storage-provisioner || true
 	minikube addons enable default-storageclass || true
 	minikube addons enable metrics-server || true
+	minikube addons enable ingress
 
 # ------- Kafka (contrôleurs -> brokers) -------
 start-kafka:
@@ -55,6 +57,12 @@ submit-spark-job:
 	# lance le job (peut prendre du temps la 1ère fois : téléchargement des packages)
 	$(K) exec -it spark-client-0 -- /bin/bash /opt/spark/work-dir/spark_submit.sh
 
+start-fastapi:
+	$(K) apply -f $(FASTAPI_DIR)/ingress.yaml
+	$(K) apply -f $(FASTAPI_DIR)/fastapi_deployement.yaml
+	$(K) rollout status deploy/python-fastapi --timeout=300s
+	@echo "here's the address to access fastapi endpoints"
+	$(K) get ingress fastapi-ingress
 
 # ============================================
 # MONITORING TARGETS (Added by Wail)
@@ -148,6 +156,8 @@ delete-resources:
 	-$(K) delete -f $(SPARK_DIR)/spark_master_deployment.yaml
 	-$(K) delete -f $(PRODUCER_DIR)/producer_deployment.yaml
 	-$(K) delete -f $(MONGODB_DIR)/mongodb_statefulset.yaml
+	-$(K) delete -f $(FASTAPI_DIR)/fastapi_deployement.yaml
+	-$(K) delete -f $(FASTAPI_DIR)/ingress.yaml
 	-$(K) delete secret mongodb-secret
 
 # GROS reset (attention: détruit aussi les PVC)

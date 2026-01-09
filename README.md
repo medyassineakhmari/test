@@ -46,7 +46,13 @@ make status
 ```
 Vous pouvez voir le status des pods , les PVC et les services.
 
-7. lancer le monitoring de prometheus: 
+7. lancer fastapi avec ingress
+```
+make start-fastapi
+```
+> to see the swagger page in your browser, execute in a seperate terminal `minikube tunnel` and keep it open, then go to `http://localhost/docs` and it should be working.
+
+8. lancer le monitoring de prometheus: 
 ```
 make setup-monitoring
 ```
@@ -54,7 +60,7 @@ make setup-monitoring
 
 Si vous sur windows ou linux, installer suivant ce guide: [helm.sh](https://helm.sh/docs/intro/install/#from-apt-debianubuntu)
 
-8. acceder l'interface de monitoring de Grafana: 
+9. acceder l'interface de monitoring de Grafana: 
 ```
 make access-grafana
 ```
