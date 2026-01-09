@@ -2,7 +2,7 @@
 export SPARK_LOG_LEVEL=WARN
 
 /opt/spark/bin/spark-submit \
-  --master spark://spark-master-service:7077 \
+  --master spark://spark-master-service.default.svc.cluster.local:7077 \
   --conf spark.pyspark.python=/usr/bin/python \
   --conf spark.pyspark.driver.python=/usr/bin/python \
   --conf spark.driver.host=spark-client-0.spark-client-service \

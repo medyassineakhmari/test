@@ -31,7 +31,7 @@ resource "google_compute_subnetwork" "subnet" {
 }
 
 # 3. Firewall
-resource "google_compute_firewall" "internal" {
+resource "google_compute_firewall" "allow_internal" {
   name    = "allow-internal"
   network = google_compute_network.vpc.name
 
@@ -46,7 +46,7 @@ resource "google_compute_firewall" "internal" {
   allow {
     protocol = "icmp"
   }
-  source_ranges = ["10.240.0.0/24"]
+  source_ranges = ["10.240.0.0/24", "192.168.0.0/16"]
 }
 
 resource "google_compute_firewall" "ssh" {

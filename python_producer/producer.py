@@ -9,7 +9,7 @@ import subprocess
 import os
 
 p = Producer({
-    "bootstrap.servers": "kafka-broker-0.kafka-broker-service:19092",
+    "bootstrap.servers": "kafka-broker-0.kafka-broker-service.default.svc.cluster.local:19092",
     "enable.idempotence": True,
     "acks": "all",
 })

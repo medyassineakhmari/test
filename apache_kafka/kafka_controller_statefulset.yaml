@@ -45,7 +45,7 @@ spec:
               log.dirs=/var/lib/kafka/data
 
               controller.listener.names=CONTROLLER
-              controller.quorum.voters=1@kafka-controller-0.kafka-controller-service:9093
+              controller.quorum.voters=1@kafka-controller-0.kafka-controller-service.default.svc.cluster.local:9093
 
               listeners=CONTROLLER://:9093
               listener.security.protocol.map=CONTROLLER:PLAINTEXT

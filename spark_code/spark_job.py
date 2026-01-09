@@ -73,7 +73,7 @@ if __name__ == "__main__":
     logs_raw = (
         spark.readStream
         .format("kafka")
-        .option("kafka.bootstrap.servers", "kafka-broker-0.kafka-broker-service:19092")
+        .option("kafka.bootstrap.servers", "kafka-broker-0.kafka-broker-service.default.svc.cluster.local:19092")
         .option("subscribe", topics_name)
         .option("startingOffsets", "earliest")  # or earliest
         .load()

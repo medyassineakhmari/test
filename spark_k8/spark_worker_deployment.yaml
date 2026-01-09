@@ -28,7 +28,7 @@ spec:
             - name: SPARK_MODE
               value: worker
             - name: SPARK_MASTER_URL
-              value: spark://spark-master-service:7077   # reach master via K8s DNS
+              value: spark://spark-master-service.default.svc.cluster.local:7077   # reach master via K8s DNS
             - name: SPARK_WORKER_WEBUI_PORT
               value: "8081"
             - name: SPARK_WORKER_MEMORY
@@ -40,18 +40,18 @@ spec:
           args:
             - |
               pip install numpy &&
-              /opt/spark/sbin/start-worker.sh spark://spark-master-service:7077 &&
+              /opt/spark/sbin/start-worker.sh spark://spark-master-service.default.svc.cluster.local:7077 &&
               tail -f /opt/spark/logs/spark--org.apache.spark.deploy.worker*.out
 
           ports:
             - containerPort: 8081
           resources:
             requests:
-              cpu: "500m"
+              cpu: "200m"
               memory: "512Mi"
             limits:
-              cpu: "1"
-              memory: "1Gi"
+              cpu: "800m"
+              memory: "2Gi"
 
 ---
 apiVersion: v1
